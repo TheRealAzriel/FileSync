@@ -7,7 +7,7 @@
 # This program does not copy out empty directories or copy the original directories, it builds the necessary directories.
 # This allows the files to retain their date metadata without altering the folders from the source. 
 param(
-    [string]$mode = "all"
+    [string]$mode = "MSMS"
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -274,6 +274,16 @@ function updateOperations{
     $form.Refresh()
 }
 
+# Variable to store the path to the JSON file containing the project folder mappings
+$jsonfilePath = "\\msms-fs\Deployment\Source\Project\ProjectFolderMappings.json" 
+
+# Variable to store the path to the text file containing the folder names to download
+$foldersToDownloadPath = "C:\SRO\Apps\FileSync\logs\Project\FoldersToDownload-$UserID.txt"  
+
+# Check if the file exists and clear it if it does
+if (Test-Path -Path $foldersToDownloadPath) {
+    Clear-Content -Path $foldersToDownloadPath
+}
 function getuserprojects{
     param ([string] $api)
 
@@ -336,6 +346,36 @@ function getuserprojects{
     } catch {
         # Write the error message to the log file
         "{0}: Failed to retrieve data from the Web API: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
+    }
+    
+    # Generate text file to use to identify folders to download
+
+    try {
+        if (Test-Path -Path $jsonfilePath) {
+            # Import the JSON file           
+            $jsonFile = Get-Content -Path $jsonfilePath | ConvertFrom-Json
+
+            # Create array to store folder names to download
+            $folderNames = @()
+
+            foreach ($jsonEntry in $jsonFile) {
+                #if ($projectID -contains $jsonEntry.ProjectID) {
+                if ($projectID -like "*$($jsonEntry.ProjectID)*") {
+                    if (-not ($folderNames -contains $jsonEntry.FolderName)) {
+                        $folderNames += $jsonEntry.FolderName
+                    }
+                }
+            }
+
+            # Output the folder names to a text file for FileSync            
+            $folderNames | Out-File -Append -FilePath $foldersToDownloadPath
+        } else {
+            "{0}: ProjectFolderMappings.json not found: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
+        }
+
+    } catch {
+        # Write the error message to the log file
+        "{0}: Failed to create foldersToDownload: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
     }
 }
 
