@@ -274,11 +274,11 @@ function updateOperations{
     $form.Refresh()
 }
 
-# Variable to store the path to the JSON file containing the project folder mappings
-$jsonfilePath = "\\msms-fs\Deployment\Source\Project\ProjectFolderMappings.json" 
+# Variable to store the path to the CSV file containing the project folder mappings
+$csvFilePath = "\\msms-fs\Deployment\Source\Project\ProjectCrossRef.csv"
 
 # Variable to store the path to the text file containing the folder names to download
-$foldersToDownloadPath = "C:\SRO\Apps\FileSync\logs\Project\FoldersToDownload-$UserID.txt"  
+$foldersToDownloadPath = "C:\SRO\Apps\FileSync\logs\Project\FoldersToDownload-$UserID-test.txt"  
 
 # Check if the file exists and clear it if it does
 if (Test-Path -Path $foldersToDownloadPath) {
@@ -348,29 +348,44 @@ function getuserprojects{
         "{0}: Failed to retrieve data from the Web API: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
     }
     
-    # Generate text file to use to identify folders to download
+    # Read ProjectCrossRef.csv, parse Project ID and Field name to generate text file to use to identify folders to download
 
     try {
-        if (Test-Path -Path $jsonfilePath) {
-            # Import the JSON file           
-            $jsonFile = Get-Content -Path $jsonfilePath | ConvertFrom-Json
+        if (Test-Path -Path $csvFilePath) {
+            # Import the CSV file           
+            $csvFile = Import-Csv -Path $csvFilePath
 
             # Create array to store folder names to download
             $folderNames = @()
+            
+            # Process each line in the CSV
+            foreach ($csvEntry in $csvFile) {
+                $projectIDFromCsv = $csvEntry.'Project ID'.Trim()
+                $folderNameFromCsv = $csvEntry.'Folder Name'.Trim()
 
-            foreach ($jsonEntry in $jsonFile) {
-                #if ($projectID -contains $jsonEntry.ProjectID) {
-                if ($projectID -like "*$($jsonEntry.ProjectID)*") {
-                    if (-not ($folderNames -contains $jsonEntry.FolderName)) {
-                        $folderNames += $jsonEntry.FolderName
+                if (-not [string]::IsNullOrEmpty($projectIDFromCsv)) {
+                    foreach ($id in $projectID) {
+                        if ($id -like "*$projectIDFromCsv*") {
+                                    
+                            if (-not ($folderNames -contains $folderNameFromCsv)) {                                
+                                $folderNames += $folderNameFromCsv
+                            }
+                        }
                     }
                 }
             }
+            <#foreach ($csvEntry in $csvFile) {
+                if ($projectID -like "*$($csvEntry.ProjectID)*") {
+                    if (-not ($folderNames -contains $csvEntry.FolderName)) {
+                        $folderNames += $csvEntry.FolderName
+                    }
+                }
+            }#>
 
             # Output the folder names to a text file for FileSync            
             $folderNames | Out-File -Append -FilePath $foldersToDownloadPath
         } else {
-            "{0}: ProjectFolderMappings.json not found: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
+            "{0}: ProjectFolderMappings.csvnot found: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
         }
 
     } catch {
@@ -378,7 +393,6 @@ function getuserprojects{
         "{0}: Failed to create foldersToDownload: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
     }
 }
-
 function CoreFiles {
     #Invoke the method with a source and destination. I use variables to avoid having to write the same destination down here incase they change later down the line.
 
