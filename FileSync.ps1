@@ -279,7 +279,7 @@ function updateOperations{
 $csvFilePath = "\\msms-fs\Deployment\Source\Project\ProjectCrossRef.csv"
 
 # Variable to store the path to the text file containing the folder names to download
-$foldersToDownloadPath = "C:\SRO\Apps\FileSync\logs\Project\FoldersToDownload-$UserID-test.txt"  
+$foldersToDownloadPath = "C:\SRO\Apps\FileSync\logs\Project\FoldersToDownload-$UserID.txt"  
 
 # Check if the file exists and clear it if it does
 if (Test-Path -Path $foldersToDownloadPath) {
