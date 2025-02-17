@@ -12,6 +12,7 @@ param(
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName "System.Net.Http"
 
 # Running this first will prevent the script from opening multiple instances
 
@@ -314,16 +315,52 @@ function getuserprojects{
     $localPath = $userProjectsPath
     $errorLogPath = Join-Path -Path $localPath -ChildPath "GetProjectID_errorlog.txt"
 
-    # Create a new WebClient object and set it to use the default credentials
-    $webClient = New-Object System.Net.WebClient
-    $webClient.UseDefaultCredentials = $true
-
     try {
-        # Download the JSON response from the Web API
-        $response = $webClient.DownloadString($api)
+        # Create a new instance of HttpClientHandler
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+
+        # Optionally use default credentials
+        $handler.UseDefaultCredentials = $true
+
+        # Create the HttpClient using the handler
+        $client = [System.Net.Http.HttpClient]::new($handler)
+
+        # Set the timeout (e.g., 10 seconds)
+        $client.Timeout = [TimeSpan]::FromSeconds(3)
+
+        # Set User-Agent header if needed
+        $client.DefaultRequestHeaders.UserAgent.ParseAdd("MyPowerShellClient/1.0")
+
+        # URI for the request
+        $uri = $api
+
+        try {
+            # Synchronously send a GET request
+            $task = $client.GetAsync($uri)
+            $task.Wait()
+
+            # Check if the request was successful
+            if ($task.Result.IsSuccessStatusCode) {
+                $result = $task.Result.Content.ReadAsStringAsync().Result
+                Write-Host "Task completed successfully. Result:"
+                Write-Host $result
+            }
+            else {
+                Write-Host "Error: $($task.Result.StatusCode)"
+            }
+        }
+        catch [System.AggregateException] {
+            # Handle aggregate exceptions from asynchronous operations
+            foreach ($innerException in $_.Exception.InnerExceptions) {
+                Write-Host "Exception: $($innerException.Message)"
+            }
+        }
+        catch {
+            Write-Host "An unexpected exception occurred: $($_.Exception.Message)"
+        }
 
         # Convert the JSON response to a PowerShell object
-        $roles = ConvertFrom-Json $response
+        $roles = ConvertFrom-Json $result
 
         # Initialize array to store project IDs
         $projectID = @()
@@ -354,36 +391,39 @@ function getuserprojects{
         if (Test-Path -Path $csvFilePath) {
             # Import the CSV file           
             $csvFile = Import-Csv -Path $csvFilePath
-
-            # Create array to store folder names to download
-            $folderNames = @()
+            if (Test-Path -Path  $userProjectsPath) {
+                $userProjectsToScan = Get-Content -Path $userProjectsPath                
             
-            # Process each line in the CSV
-            foreach ($csvEntry in $csvFile) {
-                $projectIDFromCsv = $csvEntry.'Project ID'.Trim()
-                $folderNameFromCsv = $csvEntry.'Folder Name'.Trim()
+                # Create array to store folder names to download
+                $folderNames = @()
+                
+                # Process each line in the CSV
+                foreach ($csvEntry in $csvFile) {
+                    $projectIDFromCsv = $csvEntry.'Project ID'.Trim()
+                    $folderNameFromCsv = $csvEntry.'Folder Name'.Trim()
 
-                if (-not [string]::IsNullOrEmpty($projectIDFromCsv)) {
-                    foreach ($id in $projectID) {
-                        if ($id -like "*$projectIDFromCsv*") {
-                                    
-                            if (-not ($folderNames -contains $folderNameFromCsv)) {                                
-                                $folderNames += $folderNameFromCsv
+                    if (-not [string]::IsNullOrEmpty($projectIDFromCsv)) {
+                        foreach ($id in $userProjectsToScan) {
+                            if ($id -like "*$projectIDFromCsv*") {
+                                        
+                                if (-not ($folderNames -contains $folderNameFromCsv)) {                                
+                                    $folderNames += $folderNameFromCsv
+                                }
                             }
                         }
                     }
                 }
             }
-            <#foreach ($csvEntry in $csvFile) {
-                if ($projectID -like "*$($csvEntry.ProjectID)*") {
-                    if (-not ($folderNames -contains $csvEntry.FolderName)) {
-                        $folderNames += $csvEntry.FolderName
+                <#foreach ($csvEntry in $csvFile) {
+                    if ($projectID -like "*$($csvEntry.ProjectID)*") {
+                        if (-not ($folderNames -contains $csvEntry.FolderName)) {
+                            $folderNames += $csvEntry.FolderName
+                        }
                     }
-                }
-            }#>
+                }#>
 
-            # Output the folder names to a text file for FileSync            
-            $folderNames | Out-File -Append -FilePath $foldersToDownloadPath
+                # Output the folder names to a text file for FileSync            
+                $folderNames | Out-File -Append -FilePath $foldersToDownloadPath
         } else {
             "{0}: ProjectFolderMappings.csvnot found: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
         }
@@ -392,6 +432,9 @@ function getuserprojects{
         # Write the error message to the log file
         "{0}: Failed to create foldersToDownload: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
     }
+    
+    # Cleanup
+    $client.Dispose()
 }
 function CoreFiles {
     #Invoke the method with a source and destination. I use variables to avoid having to write the same destination down here incase they change later down the line.
@@ -518,7 +561,7 @@ function finishProgram {
 # Program Start
 
 $mutexName = "Global\FileSync"
-
+projectFilesMode -modeSwitch $mode
 # Declare the variable before using [ref]
 $createdNew = $false
 $createdNewRef = [ref] $createdNew
@@ -554,7 +597,7 @@ try {
     CoreFiles
 
     ProjectFiles
-    projectFilesMode -modeSwitch $mode
+
 
     CustomFiles
 
