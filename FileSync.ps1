@@ -1,5 +1,5 @@
-# This is a program written by Brendan Carroll for use in copying files.
-# This program was written on 2/5/25.
+# This is a program written in collaboration by Brendan Carroll and Chad Cattel for use in copying files.
+# This program was written on 2/5/25 and established on 2/25/25.
 #
 # This program uses a method to copy files from a given source to a destination.
 # When this program is openned, it creates the form based on the directives listed below. 
@@ -7,7 +7,7 @@
 # This program does not copy out empty directories or copy the original directories, it builds the necessary directories.
 # This allows the files to retain their date metadata without altering the folders from the source. 
 param(
-    [string]$mode = "SurveyTrak"
+    [string]$mode = "all"
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -37,6 +37,7 @@ $MSMSProd = "http://msmsprodapp/MSMS.WebApi/api/user/getroles/$UserID"
 $MSMSTestC = "http://msmstestcurrentapp/MSMS.WebApi/api/user/getroles/$UserID"
 # $MSMSQA = "http://msmsqaapp/MSMS.WebApi/api/user/getroles/$UserID"
 # $MSMSTestNext = "http://msmstestnextapp/MSMS.WebApi/api/user/getroles/$UserID"
+$script:apiFailed=$false
 
 #File Paths
 #Core File paths are at the top with project paths towards the end of this list
@@ -295,7 +296,7 @@ function updateOperations {
 }
 
 function getUserProjectsST {
-    
+
     # Initilize variables
     $errorLogPath = "C:\SRO\Apps\FileSync\logs\Project\GetProjectID_surveytrak_errorlog.txt" 
         
@@ -447,25 +448,30 @@ function getuserprojects {
                 #Write-Host $result
             }
             else {
+                # If request was not successful display the following error:
                 Write-Host "Error: $($task.Result.StatusCode)"
-                "Error: $($task.Result.StatusCode)" | Out-File -Append -FilePath $errorLogPath
+                "[Error] $($task.Result.StatusCode)" | Out-File -Append -FilePath $errorLogPath
+                $script:apiFailed=$true
             }
         }
         catch [System.Threading.Tasks.TaskCanceledException] {
             # Handle any cancelations from an api taking too long
             Write-Host "Exception: $projectLog was unable to resolve within timeout."
-            "Exception: $($innerException.Message) $projectLog was unable to resolve within timeout." | Out-File -Append -FilePath $errorLogPath
+            "[Exception] $($innerException.Message) $projectLog was unable to resolve within timeout." | Out-File -Append -FilePath $errorLogPath
+            $script:apiFailed=$true
         }
         catch [System.AggregateException] {
             # Handle aggregate exceptions from asynchronous operations
             foreach ($innerException in $_.Exception.InnerExceptions) {
                 Write-Host "Exception: $($innerException.Message)"
-                "Exception: $($innerException.Message)" | Out-File -Append -FilePath $errorLogPath
+                "[Exception] $($innerException.Message)" | Out-File -Append -FilePath $errorLogPath
             }
+            $script:apiFailed=$true
         }
         catch {
             Write-Host "An unexpected exception occurred: $($_.Exception.Message)"
-            "An unexpected exception occurred: $($_.Exception.Message)" | Out-File -Append -FilePath $errorLogPath
+            "[Exception] An unexpected exception occurred: $($_.Exception.Message)" | Out-File -Append -FilePath $errorLogPath
+            $script:apiFailed=$true
         }
 
         # Convert the JSON response to a PowerShell object
@@ -492,7 +498,7 @@ function getuserprojects {
     }
     catch {
         # Write the error message to the log file
-        "{0}: Failed to retrieve data from the Web API: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
+        "[Error] {0}: Failed to retrieve data from the Web API: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
     }
     
     # Read ProjectCrossRef.csv, parse Project ID and Field name to generate text file to use to identify folders to download
@@ -529,13 +535,13 @@ function getuserprojects {
             $folderNames | Out-File -Append -FilePath $foldersToDownloadPath
         }
         else {
-            "{0}: ProjectFolderMappings.csvnot found: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
+            "[Error] {0}: ProjectFolderMappings.csvnot found: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
         }
 
     }
     catch {
         # Write the error message to the log file
-        "{0}: Failed to create foldersToDownload: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
+        "[Error] {0}: Failed to create foldersToDownload: $_" -f (Get-Date) | Out-File -Append -FilePath $errorLogPath
     }
     
     # Cleanup
@@ -622,8 +628,11 @@ Function ProjectFiles {
         $sourceProjectDesktop = Join-Path (Join-Path $SourceProjectPath $projectFolderName) "Desktop"
         $sourceProjectRoot = Join-Path (Join-Path $SourceProjectPath $projectFolderName) "root"
 
-        if ($projectFolderName -eq "SMS") {
+        if (($projectFolderName -eq "SMS") -and ((Test-Path -path $allUserLogin))) {
             CopyFilesWithGuiProgressBar -source $sourceBuild -destination $destinationBuild
+        }
+        elseif (($projectFolderName -eq "SMS") -and (-not (Test-Path -path $allUserLogin))) {
+            # Skip
         }
         else {
             # Copy files from the constructed path to the destination
@@ -731,8 +740,15 @@ function finishProgram {
 
     $mutex.ReleaseMutex()
     $mutex.Dispose()
+
     # Optionally close the form
     $form.Close()
+
+    #Write-Host $script:apiFailed
+
+    if($script:apiFailed -eq $true){
+        [System.Windows.Forms.MessageBox]::Show("MSMS file sync has failed. Please try again in 15 minutes.", "API Error", 'OK', 'Error')
+    }
 
     #& "C:\SRO\SRUD\Send Receive Upload Download.exe"
 }
